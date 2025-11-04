@@ -1,0 +1,140 @@
+<%+header%>
+<div class="cbi-map">
+  <h2 name="content"><%:Enhanced ATC Status%></h2>
+
+  <fieldset class="cbi-section">
+    <legend><%:Modem Status%></legend>
+    <div class="cbi-section-descr">
+      <%:Current status and information about your Fibocom FM350-GL modem%>
+    </div>
+
+    <div class="cbi-section-node">
+      <div class="cbi-value" id="modem-status">
+        <label class="cbi-value-title"><%:Connection Status%>:</label>
+        <div class="cbi-value-field">
+          <em><%:Loading...%></em>
+        </div>
+      </div>
+
+      <div class="cbi-value" id="fcc-status">
+        <label class="cbi-value-title"><%:FCC Lock Status%>:</label>
+        <div class="cbi-value-field">
+          <em><%:Loading...%></em>
+        </div>
+      </div>
+
+      <div class="cbi-value" id="firmware-info">
+        <label class="cbi-value-title"><%:Firmware Version%>:</label>
+        <div class="cbi-value-field">
+          <em><%:Loading...%></em>
+        </div>
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset class="cbi-section">
+    <legend><%:Quick Actions%></legend>
+    <div class="cbi-section-node">
+      <div class="cbi-value">
+        <input type="button" class="cbi-button cbi-button-action"
+               value="<%:Check FCC Status%>" onclick="checkFCCStatus()" />
+        <input type="button" class="cbi-button cbi-button-apply"
+               value="<%:Unlock FCC%>" onclick="unlockFCC()" />
+        <input type="button" class="cbi-button cbi-button-reload"
+               value="<%:Refresh Status%>" onclick="refreshStatus()" />
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset class="cbi-section">
+    <legend><%:Logs%></legend>
+    <div class="cbi-section-node">
+      <div class="cbi-value">
+        <label class="cbi-value-title"><%:Recent Log Entries%>:</label>
+        <div class="cbi-value-field">
+          <textarea id="log-output" readonly style="width:100%;height:200px;font-family:monospace;"></textarea>
+        </div>
+      </div>
+      <div class="cbi-value">
+        <input type="button" class="cbi-button cbi-button-reload"
+               value="<%:Refresh Logs%>" onclick="refreshLogs()" />
+      </div>
+    </div>
+  </fieldset>
+</div>
+
+<script type="text/javascript">//<![CDATA[
+  function checkFCCStatus() {
+    var status = document.getElementById('fcc-status').querySelector('.cbi-value-field');
+    status.innerHTML = '<em><%:Checking...%></em>';
+
+    XHR.poll(1, '<%=url("admin/network/enhanced_atc/fcc_status")%>', null,
+      function(x, data) {
+        if (data && data.status) {
+          status.innerHTML = data.status;
+        } else {
+          status.innerHTML = '<em><%:Error checking status%></em>';
+        }
+      }
+    );
+  }
+
+  function unlockFCC() {
+    if (!confirm('<%:Are you sure you want to unlock FCC restrictions?%>')) {
+      return;
+    }
+
+    var status = document.getElementById('fcc-status').querySelector('.cbi-value-field');
+    status.innerHTML = '<em><%:Unlocking...%></em>';
+
+    XHR.poll(1, '<%=url("admin/network/enhanced_atc/fcc_unlock")%>', null,
+      function(x, data) {
+        if (data && data.success) {
+          status.innerHTML = '<span style="color:green;"><%:FCC Unlocked Successfully%></span>';
+        } else {
+          status.innerHTML = '<span style="color:red;"><%:FCC Unlock Failed%></span>';
+        }
+      }
+    );
+  }
+
+  function refreshStatus() {
+    checkFCCStatus();
+
+    XHR.poll(1, '<%=url("admin/network/enhanced_atc/modem_info")%>', null,
+      function(x, data) {
+        if (data) {
+          if (data.modem_status) {
+            document.getElementById('modem-status').querySelector('.cbi-value-field').innerHTML = data.modem_status;
+          }
+          if (data.firmware) {
+            document.getElementById('firmware-info').querySelector('.cbi-value-field').innerHTML = data.firmware;
+          }
+        }
+      }
+    );
+  }
+
+  function refreshLogs() {
+    var logArea = document.getElementById('log-output');
+    logArea.value = '<%:Loading logs...%>';
+
+    XHR.poll(1, '<%=url("admin/network/enhanced_atc/logs")%>', null,
+      function(x, data) {
+        if (data && data.logs) {
+          logArea.value = data.logs;
+        } else {
+          logArea.value = '<%:No logs available%>';
+        }
+      }
+    );
+  }
+
+  // Auto-refresh status on page load
+  window.addEventListener('load', function() {
+    refreshStatus();
+    refreshLogs();
+  });
+//]]></script>
+
+<%+footer%>

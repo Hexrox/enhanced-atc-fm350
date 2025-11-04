@@ -1,0 +1,169 @@
+#!/bin/sh /etc/rc.common
+
+START=19
+STOP=89
+USE_PROCD=1
+
+PROG_NAME="enhanced-atc"
+LOG_DIR="/tmp/atc_logs"
+
+# Required packages and tools
+REQUIRED_PACKAGES="libuci libjson-c"
+REQUIRED_TOOLS="stty timeout dd grep tr sed logger uci"
+REQUIRED_LUA_LIBS="luci.sys luci.jsonc nixio.fs"
+
+boot() {
+    start "$@"
+}
+
+check_dependencies() {
+    local missing_deps=""
+    local missing_tools=""
+
+    echo "Checking Enhanced ATC dependencies..."
+
+    # Check required command-line tools
+    for tool in $REQUIRED_TOOLS; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            missing_tools="$missing_tools $tool"
+        fi
+    done
+
+    # Check for modem device
+    if ! ls /dev/ttyUSB* >/dev/null 2>&1; then
+        echo "WARNING: No USB serial devices found (/dev/ttyUSB*)"
+        echo "  - Check if modem is connected"
+        echo "  - Check if usb-serial kernel modules are loaded"
+        echo "  - Run: dmesg | grep ttyUSB"
+    fi
+
+    # Check netifd protocol library
+    if [ ! -f "/lib/netifd/proto/atc.sh" ]; then
+        echo "ERROR: Protocol handler not found: /lib/netifd/proto/atc.sh"
+        return 1
+    fi
+
+    # Check configuration file
+    if [ ! -f "/etc/config/enhanced_atc" ]; then
+        echo "WARNING: Configuration file not found: /etc/config/enhanced_atc"
+        echo "  - Creating default configuration..."
+        touch /etc/config/enhanced_atc
+    fi
+
+    if [ -n "$missing_tools" ]; then
+        echo "ERROR: Missing required tools:$missing_tools"
+        echo "  - These are usually part of busybox or coreutils-* packages"
+        return 1
+    fi
+
+    echo "All required dependencies are present."
+    return 0
+}
+
+start_service() {
+    echo "Starting Enhanced ATC Service..."
+
+    # Check dependencies
+    if ! check_dependencies; then
+        echo "ERROR: Dependency check failed. Service not started."
+        return 1
+    fi
+
+    # Create log directory
+    mkdir -p "$LOG_DIR"
+
+    # Clean old logs (older than 7 days)
+    find "$LOG_DIR" -name "*.log" -type f -mtime +7 -exec rm -f {} \; 2>/dev/null || true
+
+    # Log startup
+    logger -t "$PROG_NAME" "Enhanced ATC service started"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Enhanced ATC service started" >> "$LOG_DIR/INFO.log"
+
+    # Reload netifd to register protocol
+    /etc/init.d/network reload 2>/dev/null || true
+
+    echo "Enhanced ATC Service started successfully."
+    return 0
+}
+
+stop_service() {
+    echo "Stopping Enhanced ATC Service..."
+
+    logger -t "$PROG_NAME" "Enhanced ATC service stopped"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Enhanced ATC service stopped" >> "$LOG_DIR/INFO.log"
+
+    echo "Enhanced ATC Service stopped."
+}
+
+service_triggers() {
+    procd_add_reload_trigger "enhanced_atc"
+}
+
+status() {
+    echo "=== Enhanced ATC Service Status ==="
+
+    if [ -f "/lib/netifd/proto/atc.sh" ]; then
+        echo "Protocol handler: Installed"
+    else
+        echo "Protocol handler: NOT FOUND"
+    fi
+
+    if [ -f "/etc/config/enhanced_atc" ]; then
+        echo "Configuration: Present"
+    else
+        echo "Configuration: MISSING"
+    fi
+
+    if ls /dev/ttyUSB* >/dev/null 2>&1; then
+        echo "USB devices: $(ls /dev/ttyUSB* | tr '\n' ' ')"
+    else
+        echo "USB devices: NONE FOUND"
+    fi
+
+    if [ -d "$LOG_DIR" ]; then
+        echo "Log directory: $LOG_DIR"
+        echo "Recent logs:"
+        find "$LOG_DIR" -name "*.log" -type f -exec sh -c 'echo "  - $1 ($(wc -l < "$1") lines)"' _ {} \;
+    else
+        echo "Log directory: Not created"
+    fi
+
+    echo ""
+    echo "To check modem status, run: enhanced-atc-cli status"
+    echo "To view logs, run: tail -f $LOG_DIR/INFO.log"
+}
+
+install_check() {
+    echo "=== Enhanced ATC Installation Check ==="
+    echo ""
+
+    check_dependencies
+
+    echo ""
+    echo "Checking LuCI components..."
+
+    if [ -f "/usr/lib/lua/luci/controller/admin/enhanced_atc.lua" ]; then
+        echo "  LuCI controller: Installed"
+    else
+        echo "  LuCI controller: Not found (web interface unavailable)"
+    fi
+
+    if [ -f "/usr/lib/lua/luci/model/cbi/admin_network/enhanced_atc.lua" ]; then
+        echo "  LuCI model: Installed"
+    else
+        echo "  LuCI model: Not found"
+    fi
+
+    if [ -f "/usr/bin/enhanced-atc-cli" ]; then
+        echo "  CLI tool: Installed"
+    else
+        echo "  CLI tool: Not found"
+    fi
+
+    echo ""
+    echo "Installation check complete."
+}
+
+EXTRA_COMMANDS="status install_check"
+EXTRA_HELP="	status		Show service status
+	install_check	Check installation and dependencies"

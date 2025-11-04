@@ -1,0 +1,52 @@
+# Build artifacts
+*.o
+*.so
+*.a
+*.ipk
+*.tar.gz
+
+# Temporary files
+*~
+*.swp
+*.swo
+.*.swp
+.DS_Store
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Build directories
+/build/
+/tmp/
+/dist/
+
+# OpenWrt specific
+/staging_dir/
+/build_dir/
+/bin/
+/dl/
+/feeds/
+/.config
+/.config.old
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Personal notes
+TODO.txt
+NOTES.md

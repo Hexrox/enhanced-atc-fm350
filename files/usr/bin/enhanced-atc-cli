@@ -1,0 +1,210 @@
+#!/bin/sh
+# Enhanced ATC CLI with FCC Unlock support
+# Version: 1.1.0
+
+PROG_NAME="enhanced-atc-cli"
+VERSION="1.1.0"
+
+usage() {
+    cat << EOF
+$PROG_NAME v$VERSION - Enhanced ATC with FCC Unlock
+
+USAGE: $PROG_NAME [OPTIONS] COMMAND
+
+COMMANDS:
+    status          Show connection status
+    fcc-status      Check FCC lock status
+    fcc-unlock      Perform FCC unlock
+    fw-info         Show firmware information
+    setup           Interactive setup wizard
+
+OPTIONS:
+    -h, --help      Show help message
+    -v, --verbose   Verbose output
+    -d, --device    Specify device path
+
+EXAMPLES:
+    $PROG_NAME fcc-status
+    $PROG_NAME fcc-unlock
+    $PROG_NAME fw-info
+    $PROG_NAME setup
+EOF
+}
+
+log_info() { echo "[INFO] $1"; }
+log_error() { echo "[ERROR] $1"; }
+
+get_device() {
+    if [ -n "$DEVICE_OVERRIDE" ]; then
+        echo "$DEVICE_OVERRIDE"
+    else
+        for dev in /dev/ttyUSB*; do
+            if [ -c "$dev" ]; then
+                response=$(timeout 3 sh -c "echo ATI > $dev && cat $dev" 2>/dev/null)
+                if echo "$response" | grep -qi "fibocom\|fm350"; then
+                    echo "$dev"
+                    return
+                fi
+            fi
+        done
+        echo "/dev/ttyUSB3"
+    fi
+}
+
+show_status() {
+    local device=$(get_device)
+    log_info "Checking modem status on $device..."
+
+    if [ ! -c "$device" ]; then
+        log_error "Device $device not found"
+        return 1
+    fi
+
+    echo "=== Modem Status ==="
+    echo "Device: $device"
+
+    # Check if device responds
+    response=$(timeout 5 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'ATI\r\n' > $device
+        sleep 1
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$' | head -5)
+
+    if [ -n "$response" ]; then
+        echo "Status: Connected"
+        echo "$response"
+    else
+        echo "Status: No response"
+        return 1
+    fi
+}
+
+fcc_status() {
+    local device=$(get_device)
+    log_info "Checking FCC lock status on $device..."
+
+    if [ ! -c "$device" ]; then
+        log_error "Device $device not found"
+        return 1
+    fi
+
+    echo "=== FCC Lock Status ==="
+
+    # Check FCC lock status with AT+GTFCCLOCK?
+    response=$(timeout 5 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+GTFCCLOCK?\r\n' > $device
+        sleep 1
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$')
+
+    if echo "$response" | grep -qi "GTFCCLOCK"; then
+        echo "$response"
+        if echo "$response" | grep -qi "0"; then
+            echo "FCC Status: UNLOCKED"
+            return 0
+        else
+            echo "FCC Status: LOCKED"
+            return 1
+        fi
+    else
+        log_error "Unable to determine FCC status"
+        return 2
+    fi
+}
+
+fcc_unlock() {
+    local device=$(get_device)
+    log_info "Starting FCC unlock procedure on $device..."
+
+    if [ ! -c "$device" ]; then
+        log_error "Device $device not found"
+        return 1
+    fi
+
+    echo "=== FCC Unlock Procedure ==="
+
+    # Send FCC unlock command
+    echo "Sending unlock command..."
+    response=$(timeout 10 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+GTFCCLOCK=0\r\n' > $device
+        sleep 2
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$')
+
+    echo "$response"
+
+    if echo "$response" | grep -qi "OK"; then
+        log_info "FCC unlock successful"
+        echo "SUCCESS: FCC unlock completed"
+        return 0
+    else
+        log_error "FCC unlock failed"
+        echo "FAILED: FCC unlock unsuccessful"
+        return 1
+    fi
+}
+
+fw_info() {
+    local device=$(get_device)
+    log_info "Retrieving firmware information from $device..."
+
+    if [ ! -c "$device" ]; then
+        log_error "Device $device not found"
+        return 1
+    fi
+
+    echo "=== Firmware Information ==="
+
+    # Get firmware version
+    response=$(timeout 5 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+CGMR\r\n' > $device
+        sleep 1
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$' | grep -v 'AT+CGMR')
+
+    if [ -n "$response" ]; then
+        echo "Firmware Version:"
+        echo "$response"
+    else
+        echo "Unable to retrieve firmware info"
+        return 1
+    fi
+
+    # Get model info
+    response=$(timeout 5 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'ATI\r\n' > $device
+        sleep 1
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$' | grep -v 'ATI')
+
+    if [ -n "$response" ]; then
+        echo ""
+        echo "Model Information:"
+        echo "$response"
+    fi
+}
+
+VERBOSE=0
+DEVICE_OVERRIDE=""
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        -h|--help) usage; exit 0;;
+        -v|--verbose) VERBOSE=1;;
+        -d|--device) DEVICE_OVERRIDE="$2"; shift;;
+        status) show_status; exit 0;;
+        fcc-status) fcc_status; exit 0;;
+        fcc-unlock) fcc_unlock; exit 0;;
+        fw-info) fw_info; exit 0;;
+        setup) echo "Interactive setup not implemented"; exit 0;;
+        *) echo "Unknown command: $1"; usage; exit 1;;
+    esac
+    shift
+ done
+
+usage
