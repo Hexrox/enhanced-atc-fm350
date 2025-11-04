@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced ATC - LuCI Interface Preview</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: #0099cc;
+            color: white;
+            padding: 20px;
+        }
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        .tabs {
+            display: flex;
+            background: #e8e8e8;
+            border-bottom: 2px solid #0099cc;
+        }
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        .tab:hover {
+            background: #d8d8d8;
+        }
+        .tab.active {
+            background: white;
+            font-weight: bold;
+        }
+        .content {
+            padding: 20px;
+        }
+        .section {
+            margin-bottom: 30px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .section-header {
+            background: #f8f8f8;
+            padding: 12px 15px;
+            border-bottom: 1px solid #ddd;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .section-desc {
+            padding: 10px 15px;
+            background: #fafafa;
+            font-size: 13px;
+            color: #666;
+            border-bottom: 1px solid #eee;
+        }
+        .section-body {
+            padding: 15px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #333;
+        }
+        .form-group .help {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-top: 3px;
+        }
+        .form-group input[type="text"],
+        .form-group input[type="password"],
+        .form-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .form-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .table th {
+            background: #f0f0f0;
+            padding: 10px;
+            text-align: left;
+            border-bottom: 2px solid #ddd;
+            font-weight: 600;
+        }
+        .table td {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        .btn-primary {
+            background: #0099cc;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #007aa3;
+        }
+        .btn-success {
+            background: #5cb85c;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #4cae4c;
+        }
+        .btn-action {
+            background: #5bc0de;
+            color: white;
+        }
+        .btn-action:hover {
+            background: #46b8da;
+        }
+        .btn-danger {
+            background: #d9534f;
+            color: white;
+        }
+        .btn-sm {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        .status-box {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #5cb85c;
+            margin-bottom: 10px;
+        }
+        .status-label {
+            font-weight: 500;
+            color: #555;
+        }
+        .status-value {
+            color: #5cb85c;
+            font-weight: bold;
+        }
+        .status-value.error {
+            color: #d9534f;
+        }
+        .status-value.warning {
+            color: #f0ad4e;
+        }
+        .log-viewer {
+            background: #2d2d2d;
+            color: #f0f0f0;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            height: 300px;
+            overflow-y: auto;
+            border-radius: 4px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            line-height: 1.6;
+        }
+        .log-timestamp {
+            color: #888;
+        }
+        .log-level-info {
+            color: #5bc0de;
+        }
+        .log-level-fcc {
+            color: #f0ad4e;
+        }
+        .log-level-error {
+            color: #d9534f;
+        }
+        .log-level-warn {
+            color: #f0ad4e;
+        }
+        .actions {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+            text-align: right;
+        }
+        .actions .btn {
+            margin-left: 10px;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .badge-success {
+            background: #5cb85c;
+            color: white;
+        }
+        .badge-danger {
+            background: #d9534f;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Enhanced ATC</h1>
+            <p>Advanced protocol handler for Fibocom FM350-GL with FCC unlock support</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('config')">Configuration</button>
+            <button class="tab" onclick="showTab('status')">Status</button>
+        </div>
+
+        <!-- Configuration Tab -->
+        <div id="config" class="tab-content active">
+            <div class="content">
+                <!-- General Settings -->
+                <div class="section">
+                    <div class="section-header">General Settings</div>
+                    <div class="section-body">
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" checked>
+                                Enable FCC Unlock
+                            </label>
+                            <span class="help">Automatically unlock FCC restrictions on modem startup</span>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" checked>
+                                Check Firmware Version
+                            </label>
+                            <span class="help">Verify firmware version on modem initialization</span>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox">
+                                Enable Debug Logging
+                            </label>
+                            <span class="help">Enable verbose debug logging for troubleshooting</span>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox">
+                                Auto Optimization
+                            </label>
+                            <span class="help">Automatically optimize connection parameters based on signal quality</span>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox">
+                                Power Management
+                            </label>
+                            <span class="help">Enable power-saving features for the modem</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Interface Configuration -->
+                <div class="section">
+                    <div class="section-header">Interface Configuration</div>
+                    <div class="section-body">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Enabled</th>
+                                    <th>Device</th>
+                                    <th>APN</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>wan</td>
+                                    <td><span class="badge badge-success">Enabled</span></td>
+                                    <td>/dev/ttyUSB3</td>
+                                    <td>internet</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary" onclick="editInterface()">Edit</button>
+                                        <button class="btn btn-sm btn-danger">Delete</button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div style="margin-top: 15px;">
+                            <button class="btn btn-success">➕ Add Interface</button>
+                        </div>
+
+                        <!-- Expanded Edit Form (hidden by default) -->
+                        <div id="edit-form" style="display:none; margin-top: 20px; padding-top: 20px; border-top: 2px solid #ddd;">
+                            <h3 style="margin-bottom: 15px;">Edit Interface: wan</h3>
+
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" checked>
+                                    Enabled
+                                </label>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Device Path</label>
+                                <input type="text" value="/dev/ttyUSB3" placeholder="/dev/ttyUSB3">
+                                <span class="help">Serial device path (e.g., /dev/ttyUSB3)</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label>APN</label>
+                                <input type="text" value="internet" placeholder="internet">
+                                <span class="help">Access Point Name provided by your carrier</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Username</label>
+                                <input type="text" placeholder="">
+                                <span class="help">Authentication username (if required)</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Password</label>
+                                <input type="password" placeholder="">
+                                <span class="help">Authentication password (if required)</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Authentication Type</label>
+                                <select>
+                                    <option value="0" selected>None</option>
+                                    <option value="1">PAP</option>
+                                    <option value="2">CHAP</option>
+                                    <option value="3">PAP/CHAP</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>PDP Type</label>
+                                <select>
+                                    <option value="IP" selected>IPv4</option>
+                                    <option value="IPV6">IPv6</option>
+                                    <option value="IPV4V6">IPv4/IPv6</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Connection Delay (seconds)</label>
+                                <input type="text" value="5" placeholder="5">
+                                <span class="help">Delay before starting connection (0-60 seconds)</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Max Retries</label>
+                                <input type="text" value="3" placeholder="3">
+                                <span class="help">Maximum number of connection retry attempts (1-10)</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Preferred Network Mode</label>
+                                <select>
+                                    <option value="auto" selected>Auto</option>
+                                    <option value="lte">LTE Only</option>
+                                    <option value="5g">5G Preferred</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Signal Threshold (dBm)</label>
+                                <input type="text" value="-90" placeholder="-90">
+                                <span class="help">Minimum acceptable signal strength</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Monitor Interval (seconds)</label>
+                                <input type="text" value="60" placeholder="60">
+                                <span class="help">How often to check connection status (30-300 seconds)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button class="btn btn-primary">💾 Save & Apply</button>
+                    <button class="btn">Save</button>
+                    <button class="btn">Reset</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Tab -->
+        <div id="status" class="tab-content">
+            <div class="content">
+                <!-- Modem Status -->
+                <div class="section">
+                    <div class="section-header">Modem Status</div>
+                    <div class="section-desc">Current status and information about your Fibocom FM350-GL modem</div>
+                    <div class="section-body">
+                        <div class="status-box">
+                            <span class="status-label">Connection Status:</span>
+                            <span class="status-value">✓ Connected</span>
+                        </div>
+                        <div class="status-box">
+                            <span class="status-label">FCC Lock Status:</span>
+                            <span class="status-value">✓ FCC Unlocked</span>
+                        </div>
+                        <div class="status-box">
+                            <span class="status-label">Firmware Version:</span>
+                            <span class="status-value">FM350-GL.R1.0.0.230915</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="section">
+                    <div class="section-header">Quick Actions</div>
+                    <div class="section-body">
+                        <button class="btn btn-action" onclick="alert('Checking FCC status...')">🔍 Check FCC Status</button>
+                        <button class="btn btn-success" onclick="alert('Unlocking FCC...')">🔓 Unlock FCC</button>
+                        <button class="btn btn-primary" onclick="refreshStatus()">🔄 Refresh Status</button>
+                    </div>
+                </div>
+
+                <!-- Logs -->
+                <div class="section">
+                    <div class="section-header">Logs</div>
+                    <div class="section-body">
+                        <div class="log-viewer" id="log-viewer">
+                            <div class="log-entry">
+                                <span class="log-timestamp">[2025-11-04 15:30:45]</span>
+                                <span class="log-level-info">[INFO]</span>
+                                Starting connection on interface wan with device /dev/ttyUSB3
+                            </div>
+                            <div class="log-entry">
+                                <span class="log-timestamp">[2025-11-04 15:30:46]</span>
+                                <span class="log-level-info">[INFO]</span>
+                                Modem: Fibocom FM350-GL
+                            </div>
+                            <div class="log-entry">
+                                <span class="log-timestamp">[2025-11-04 15:30:47]</span>
+                                <span class="log-level-info">[INFO]</span>
+                                Firmware: FM350-GL.R1.0.0.230915
+                            </div>
+                            <div class="log-entry">
+                                <span class="log-timestamp">[2025-11-04 15:30:48]</span>
+                                <span class="log-level-fcc">[FCC]</span>
+                                Starting FCC unlock procedure
+                            </div>
+                            <div class="log-entry">
+                                <span class="log-timestamp">[2025-11-04 15:30:50]</span>
+                                <span class="log-level-fcc">[FCC]</span>
+                                FCC unlock successful
+                            </div>
+                            <div class="log-entry">
+                                <span class="log-timestamp">[2025-11-04 15:30:52]</span>
+                                <span class="log-level-info">[INFO]</span>
+                                Setting APN: internet
+                            </div>
+                            <div class="log-entry">
+                                <span class="log-timestamp">[2025-11-04 15:30:54]</span>
+                                <span class="log-level-info">[INFO]</span>
+                                Modem configuration completed
+                            </div>
+                            <div class="log-entry">
+                                <span class="log-timestamp">[2025-11-04 15:30:56]</span>
+                                <span class="log-level-info">[INFO]</span>
+                                Starting data connection...
+                            </div>
+                            <div class="log-entry">
+                                <span class="log-timestamp">[2025-11-04 15:30:58]</span>
+                                <span class="log-level-info">[INFO]</span>
+                                Connection established successfully
+                            </div>
+                        </div>
+                        <div style="margin-top: 10px;">
+                            <button class="btn btn-primary" onclick="refreshLogs()">🔄 Refresh Logs</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showTab(tabName) {
+            // Hide all tabs
+            const tabs = document.querySelectorAll('.tab-content');
+            tabs.forEach(tab => tab.classList.remove('active'));
+
+            // Remove active from all buttons
+            const buttons = document.querySelectorAll('.tab');
+            buttons.forEach(btn => btn.classList.remove('active'));
+
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function editInterface() {
+            const form = document.getElementById('edit-form');
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function refreshStatus() {
+            alert('Refreshing status...\n\n✓ Connection Status: Connected\n✓ FCC Lock Status: Unlocked\n✓ Firmware: FM350-GL.R1.0.0.230915');
+        }
+
+        function refreshLogs() {
+            const logViewer = document.getElementById('log-viewer');
+            const newLog = document.createElement('div');
+            newLog.className = 'log-entry';
+            const now = new Date();
+            const timestamp = now.toISOString().replace('T', ' ').substr(0, 19);
+            newLog.innerHTML = `
+                <span class="log-timestamp">[${timestamp}]</span>
+                <span class="log-level-info">[INFO]</span>
+                Logs refreshed by user
+            `;
+            logViewer.appendChild(newLog);
+            logViewer.scrollTop = logViewer.scrollHeight;
+        }
+    </script>
+</body>
+</html>
