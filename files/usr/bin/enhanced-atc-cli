@@ -7,7 +7,7 @@ VERSION="1.1.0"
 
 usage() {
     cat << EOF
-$PROG_NAME v$VERSION - Enhanced ATC with FCC Unlock
+$PROG_NAME v$VERSION - Enhanced ATC with FCC Unlock (Fibocom FM350-GL)
 
 USAGE: $PROG_NAME [OPTIONS] COMMAND
 
@@ -16,6 +16,9 @@ COMMANDS:
     fcc-status      Check FCC lock status
     fcc-unlock      Perform FCC unlock
     fw-info         Show firmware information
+    bands           Show current band configuration
+    band-lock       Lock to specific bands
+    band-unlock     Unlock all bands (automatic)
     setup           Interactive setup wizard
 
 OPTIONS:
@@ -27,6 +30,9 @@ EXAMPLES:
     $PROG_NAME fcc-status
     $PROG_NAME fcc-unlock
     $PROG_NAME fw-info
+    $PROG_NAME bands
+    $PROG_NAME band-lock --lte 3,7,20 --5g 78
+    $PROG_NAME band-unlock
     $PROG_NAME setup
 EOF
 }
@@ -189,18 +195,242 @@ fw_info() {
     fi
 }
 
+show_bands() {
+    local device=$(get_device)
+    log_info "Retrieving band configuration from $device..."
+
+    if [ ! -c "$device" ]; then
+        log_error "Device $device not found"
+        return 1
+    fi
+
+    echo "=== Current Band Configuration (Fibocom FM350-GL) ==="
+    echo ""
+
+    # Get LTE bands
+    echo "LTE Bands:"
+    response=$(timeout 5 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QNWPREFCFG=\"lte_band\"\r\n' > $device
+        sleep 1
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$' | grep QNWPREFCFG)
+
+    if [ -n "$response" ]; then
+        bands=$(echo "$response" | cut -d'"' -f4)
+        if [ "$bands" = "0" ]; then
+            echo "  Automatic (all bands)"
+        else
+            echo "  Locked to: B$bands" | sed 's/:/, B/g'
+        fi
+    else
+        echo "  Unable to retrieve"
+    fi
+
+    echo ""
+
+    # Get 5G SA bands
+    echo "5G SA Bands:"
+    response=$(timeout 5 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QNWPREFCFG=\"nr5g_band\"\r\n' > $device
+        sleep 1
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$' | grep QNWPREFCFG)
+
+    if [ -n "$response" ]; then
+        bands=$(echo "$response" | cut -d'"' -f4)
+        if [ "$bands" = "0" ]; then
+            echo "  Automatic (all bands)"
+        else
+            echo "  Locked to: n$bands" | sed 's/:/, n/g'
+        fi
+    else
+        echo "  Unable to retrieve"
+    fi
+
+    echo ""
+
+    # Get 5G NSA bands
+    echo "5G NSA Bands:"
+    response=$(timeout 5 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QNWPREFCFG=\"nsa_nr5g_band\"\r\n' > $device
+        sleep 1
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$' | grep QNWPREFCFG)
+
+    if [ -n "$response" ]; then
+        bands=$(echo "$response" | cut -d'"' -f4)
+        if [ "$bands" = "0" ]; then
+            echo "  Automatic (all bands)"
+        else
+            echo "  Locked to: n$bands" | sed 's/:/, n/g'
+        fi
+    else
+        echo "  Unable to retrieve"
+    fi
+
+    echo ""
+
+    # Get serving cell info
+    echo "=== Current Active Band ==="
+    response=$(timeout 5 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QENG=\"servingcell\"\r\n' > $device
+        sleep 1
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$' | grep -E "LTE|NR5G")
+
+    if [ -n "$response" ]; then
+        echo "$response"
+    else
+        echo "Unable to retrieve serving cell info"
+    fi
+}
+
+band_lock() {
+    local device=$(get_device)
+    local lte_bands=""
+    local nr5g_bands=""
+
+    # Parse arguments
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --lte)
+                lte_bands="$2"
+                shift 2
+                ;;
+            --5g)
+                nr5g_bands="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    if [ -z "$lte_bands" ] && [ -z "$nr5g_bands" ]; then
+        echo "Usage: $PROG_NAME band-lock --lte <bands> --5g <bands>"
+        echo "Example: $PROG_NAME band-lock --lte 3,7,20 --5g 78"
+        return 1
+    fi
+
+    log_info "Applying band lock configuration to $device..."
+
+    if [ ! -c "$device" ]; then
+        log_error "Device $device not found"
+        return 1
+    fi
+
+    # Lock LTE bands
+    if [ -n "$lte_bands" ]; then
+        log_info "Locking LTE bands to: $lte_bands"
+        lte_formatted=$(echo "$lte_bands" | tr ',' ':')
+
+        response=$(timeout 10 sh -c "
+            stty -F $device raw -echo 115200 2>/dev/null
+            printf 'AT+QNWPREFCFG=\"lte_band\",$lte_formatted\r\n' > $device
+            sleep 2
+            cat $device 2>/dev/null
+        " | tr -d '\r' | grep -v '^$')
+
+        if echo "$response" | grep -q "OK"; then
+            log_info "LTE bands locked successfully"
+        else
+            log_error "Failed to lock LTE bands"
+        fi
+    fi
+
+    # Lock 5G bands
+    if [ -n "$nr5g_bands" ]; then
+        log_info "Locking 5G bands to: $nr5g_bands"
+        nr5g_formatted=$(echo "$nr5g_bands" | tr ',' ':')
+
+        # Set SA bands
+        response=$(timeout 10 sh -c "
+            stty -F $device raw -echo 115200 2>/dev/null
+            printf 'AT+QNWPREFCFG=\"nr5g_band\",$nr5g_formatted\r\n' > $device
+            sleep 2
+            cat $device 2>/dev/null
+        " | tr -d '\r' | grep -v '^$')
+
+        # Set NSA bands
+        timeout 10 sh -c "
+            stty -F $device raw -echo 115200 2>/dev/null
+            printf 'AT+QNWPREFCFG=\"nsa_nr5g_band\",$nr5g_formatted\r\n' > $device
+            sleep 2
+            cat $device 2>/dev/null
+        " >/dev/null 2>&1
+
+        if echo "$response" | grep -q "OK"; then
+            log_info "5G bands locked successfully"
+        else
+            log_error "Failed to lock 5G bands"
+        fi
+    fi
+
+    echo ""
+    echo "Band locking applied. Run '$PROG_NAME bands' to verify."
+}
+
+band_unlock() {
+    local device=$(get_device)
+    log_info "Unlocking all bands (automatic selection) on $device..."
+
+    if [ ! -c "$device" ]; then
+        log_error "Device $device not found"
+        return 1
+    fi
+
+    # Unlock LTE
+    response=$(timeout 10 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QNWPREFCFG=\"lte_band\",0\r\n' > $device
+        sleep 2
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$')
+
+    # Unlock 5G SA
+    timeout 10 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QNWPREFCFG=\"nr5g_band\",0\r\n' > $device
+        sleep 2
+        cat $device 2>/dev/null
+    " >/dev/null 2>&1
+
+    # Unlock 5G NSA
+    timeout 10 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QNWPREFCFG=\"nsa_nr5g_band\",0\r\n' > $device
+        sleep 2
+        cat $device 2>/dev/null
+    " >/dev/null 2>&1
+
+    if echo "$response" | grep -q "OK"; then
+        log_info "All bands unlocked successfully (automatic selection)"
+    else
+        log_error "Failed to unlock bands"
+        return 1
+    fi
+}
+
 VERBOSE=0
 DEVICE_OVERRIDE=""
 
 while [ $# -gt 0 ]; do
     case $1 in
         -h|--help) usage; exit 0;;
-        -v|--verbose) VERBOSE=1;;
-        -d|--device) DEVICE_OVERRIDE="$2"; shift;;
+        -v|--verbose) VERBOSE=1; shift;;
+        -d|--device) DEVICE_OVERRIDE="$2"; shift 2;;
         status) show_status; exit 0;;
         fcc-status) fcc_status; exit 0;;
         fcc-unlock) fcc_unlock; exit 0;;
         fw-info) fw_info; exit 0;;
+        bands) show_bands; exit 0;;
+        band-lock) shift; band_lock "$@"; exit 0;;
+        band-unlock) band_unlock; exit 0;;
         setup) echo "Interactive setup not implemented"; exit 0;;
         *) echo "Unknown command: $1"; usage; exit 1;;
     esac

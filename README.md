@@ -5,6 +5,7 @@ Advanced protocol handler for OpenWrt with automatic FCC unlock support for Fibo
 ## Features
 
 - **Automatic FCC Unlock**: Automatically unlocks FCC restrictions on modem startup
+- **Band Locking**: Lock modem to specific LTE/5G bands for optimal performance (FM350-GL specific)
 - **Full Protocol Integration**: Native netifd protocol handler for seamless OpenWrt integration
 - **LuCI Web Interface**: Easy-to-use web interface for configuration and monitoring
 - **CLI Management Tool**: Command-line tool for status checks and manual operations
@@ -63,12 +64,18 @@ enhanced-atc-cli fcc-unlock
 
 # View firmware information
 enhanced-atc-cli fw-info
+
+# Band locking (FM350-GL specific)
+enhanced-atc-cli bands                          # Show current bands
+enhanced-atc-cli band-lock --lte 3,7,20 --5g 78 # Lock to specific bands
+enhanced-atc-cli band-unlock                    # Unlock all bands (auto)
 ```
 
 ## Documentation
 
 - [Installation Guide](docs/INSTALLATION.md) - Detailed installation instructions
 - [Configuration Guide](docs/CONFIGURATION.md) - Complete configuration reference
+- [Band Locking Analysis](docs/BAND_LOCKING_ANALYSIS.md) - Technical details about band locking
 - [Examples](examples/) - Configuration examples for common carriers
 
 ## Requirements
@@ -82,6 +89,7 @@ enhanced-atc-cli fw-info
 
 ### Current
 - ✅ Automatic FCC unlock
+- ✅ Band locking for LTE and 5G (FM350-GL specific)
 - ✅ LTE/5G connectivity
 - ✅ IPv4 and IPv6 support
 - ✅ PAP/CHAP authentication
@@ -97,8 +105,8 @@ enhanced-atc-cli fw-info
 - ⏳ Power management features
 - ⏳ SMS functionality
 - ⏳ GPS/GNSS support
-- ⏳ Band locking
 - ⏳ Carrier aggregation info
+- ⏳ Advanced band scanning
 
 ## Project Structure
 

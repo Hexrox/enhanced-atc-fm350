@@ -29,6 +29,10 @@ proto_atc_init_config() {
     proto_config_add_boolean "fcc_unlock"
     proto_config_add_boolean "firmware_check"
     proto_config_add_boolean "skip_fcc_check"
+    proto_config_add_boolean "band_locking"
+    proto_config_add_string "lte_bands"
+    proto_config_add_string "nr5g_sa_bands"
+    proto_config_add_string "nr5g_nsa_bands"
 }
 
 setup_logging() {
@@ -269,6 +273,78 @@ check_modem_ready() {
     return 1
 }
 
+apply_band_locking() {
+    local band_enabled="$1"
+    local lte_bands="$2"
+    local nr5g_sa_bands="$3"
+    local nr5g_nsa_bands="$4"
+
+    if [ "$band_enabled" != "1" ]; then
+        log_info "Band locking disabled, using automatic band selection"
+        return 0
+    fi
+
+    log_info "=== Applying Band Locking Configuration ==="
+
+    # Apply LTE bands (Fibocom FM350-GL specific)
+    if [ -n "$lte_bands" ]; then
+        log_info "Setting LTE bands: $lte_bands"
+        # Convert comma-separated to colon-separated (2,4,12 -> 2:4:12)
+        local lte_formatted=$(echo "$lte_bands" | tr ',' ':')
+        at_command "AT+QNWPREFCFG=\"lte_band\",$lte_formatted" 10 3 || {
+            log_error "Failed to set LTE bands"
+            return 1
+        }
+        log_info "LTE bands configured: $lte_formatted"
+    else
+        log_info "LTE bands: automatic (all bands)"
+        at_command "AT+QNWPREFCFG=\"lte_band\",0" 10 2 1
+    fi
+
+    # Apply 5G SA bands
+    if [ -n "$nr5g_sa_bands" ]; then
+        log_info "Setting 5G SA bands: $nr5g_sa_bands"
+        local sa_formatted=$(echo "$nr5g_sa_bands" | tr ',' ':')
+        at_command "AT+QNWPREFCFG=\"nr5g_band\",$sa_formatted" 10 3 || {
+            log_error "Failed to set 5G SA bands"
+            return 1
+        }
+        log_info "5G SA bands configured: $sa_formatted"
+    else
+        log_info "5G SA bands: automatic (all bands)"
+        at_command "AT+QNWPREFCFG=\"nr5g_band\",0" 10 2 1
+    fi
+
+    # Apply 5G NSA bands
+    if [ -n "$nr5g_nsa_bands" ]; then
+        log_info "Setting 5G NSA bands: $nr5g_nsa_bands"
+        local nsa_formatted=$(echo "$nr5g_nsa_bands" | tr ',' ':')
+        at_command "AT+QNWPREFCFG=\"nsa_nr5g_band\",$nsa_formatted" 10 3 || {
+            log_error "Failed to set 5G NSA bands"
+            return 1
+        }
+        log_info "5G NSA bands configured: $nsa_formatted"
+    else
+        log_info "5G NSA bands: automatic (all bands)"
+        at_command "AT+QNWPREFCFG=\"nsa_nr5g_band\",0" 10 2 1
+    fi
+
+    log_info "Band locking configuration applied successfully"
+    return 0
+}
+
+get_current_band_info() {
+    log_info "Retrieving current band information..."
+
+    # Get serving cell information (Fibocom FM350-GL specific)
+    local serving=$(at_command "AT+QENG=\"servingcell\"" 10 2 1)
+
+    if [ -n "$serving" ]; then
+        log_info "Serving cell info: $serving"
+        echo "$serving" | grep -i "LTE\|NR5G" | head -3
+    fi
+}
+
 configure_modem() {
     log_info "Configuring modem..."
 
@@ -327,7 +403,7 @@ start_connection() {
 
 proto_atc_setup() {
     local interface="$1"
-    json_get_vars device apn username password auth pdp delay atc_debug auto_optimize signal_threshold preferred_mode monitor_interval power_management max_retries fcc_unlock firmware_check skip_fcc_check
+    json_get_vars device apn username password auth pdp delay atc_debug auto_optimize signal_threshold preferred_mode monitor_interval power_management max_retries fcc_unlock firmware_check skip_fcc_check band_locking lte_bands nr5g_sa_bands nr5g_nsa_bands
 
     # Set defaults
     [ -z "$fcc_unlock" ] && fcc_unlock="1"
@@ -335,6 +411,7 @@ proto_atc_setup() {
     [ -z "$delay" ] && delay="0"
     [ -z "$max_retries" ] && max_retries="3"
     [ -z "$atc_debug" ] && atc_debug="0"
+    [ -z "$band_locking" ] && band_locking="0"
 
     setup_logging
     log_info "=== Enhanced ATC v$ATC_VERSION Starting ==="
@@ -380,6 +457,18 @@ proto_atc_setup() {
         fi
     else
         log_info "FCC unlock skipped (fcc_unlock=$fcc_unlock, skip_fcc_check=$skip_fcc_check)"
+    fi
+
+    # Apply band locking configuration (Fibocom FM350-GL specific)
+    if [ "$band_locking" = "1" ]; then
+        log_info "Band locking enabled, applying configuration..."
+        if ! apply_band_locking "$band_locking" "$lte_bands" "$nr5g_sa_bands" "$nr5g_nsa_bands"; then
+            log_warn "Band locking configuration failed, continuing anyway..."
+        fi
+        # Get current band info after configuration
+        get_current_band_info
+    else
+        log_info "Band locking disabled, using automatic band selection"
     fi
 
     # Configure modem

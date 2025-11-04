@@ -102,4 +102,104 @@ monitor_interval.placeholder = "60"
 monitor_interval.datatype = "range(30,300)"
 monitor_interval.default = "60"
 
+-- Band Locking Section (Fibocom FM350-GL specific)
+b = m:section(TypedSection, "interface", translate("Band Locking (Fibocom FM350-GL)"))
+b.addremove = false
+b.anonymous = false
+
+band_locking = b:option(Flag, "band_locking", translate("Enable Band Locking"),
+    translate("Lock modem to specific frequency bands (FM350-GL only)"))
+band_locking.default = "0"
+band_locking.rmempty = false
+
+-- LTE Bands
+lte_bands = b:option(Value, "lte_bands", translate("LTE Bands"),
+    translate("Comma-separated list of LTE bands (e.g., 3,7,20)"))
+lte_bands:depends("band_locking", "1")
+lte_bands.placeholder = "3,7,20"
+lte_bands.datatype = "string"
+
+lte_help = b:option(DummyValue, "_lte_help", translate("Common LTE Bands in Poland:"))
+lte_help:depends("band_locking", "1")
+lte_help.rawhtml = true
+lte_help.value = [[
+<ul style="font-size:12px; margin:5px 0; padding-left:20px;">
+<li><b>B1</b> (2100 MHz) - Plus</li>
+<li><b>B3</b> (1800 MHz) - Play, Orange, Plus, T-Mobile</li>
+<li><b>B7</b> (2600 MHz) - Play, Orange, Plus, T-Mobile</li>
+<li><b>B20</b> (800 MHz) - Play, Orange, Plus, T-Mobile (rural)</li>
+</ul>
+<p style="font-size:11px; color:#666; margin:5px 0;">
+<b>FM350-GL supported LTE bands:</b><br>
+FDD: 1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 17, 18, 19, 20, 25, 26, 28, 29, 30, 32, 66, 71<br>
+TDD: 34, 38, 39, 40, 41, 42, 43, 48
+</p>
+]]
+
+-- 5G SA Bands
+nr5g_sa_bands = b:option(Value, "nr5g_sa_bands", translate("5G SA Bands"),
+    translate("Comma-separated list of 5G Standalone bands (e.g., 78)"))
+nr5g_sa_bands:depends("band_locking", "1")
+nr5g_sa_bands.placeholder = "78"
+nr5g_sa_bands.datatype = "string"
+
+-- 5G NSA Bands
+nr5g_nsa_bands = b:option(Value, "nr5g_nsa_bands", translate("5G NSA Bands"),
+    translate("Comma-separated list of 5G Non-Standalone bands (e.g., 78)"))
+nr5g_nsa_bands:depends("band_locking", "1")
+nr5g_nsa_bands.placeholder = "78"
+nr5g_nsa_bands.datatype = "string"
+
+nr5g_help = b:option(DummyValue, "_nr5g_help", translate("Common 5G Bands in Poland:"))
+nr5g_help:depends("band_locking", "1")
+nr5g_help.rawhtml = true
+nr5g_help.value = [[
+<ul style="font-size:12px; margin:5px 0; padding-left:20px;">
+<li><b>n78</b> (3500 MHz) - Play, Orange, Plus, T-Mobile (primary 5G)</li>
+</ul>
+<p style="font-size:11px; color:#666; margin:5px 0;">
+<b>FM350-GL supported 5G NR bands:</b><br>
+n1, n2, n3, n5, n7, n8, n12, n13, n14, n18, n20, n25, n26, n28, n29, n30,<br>
+n38, n40, n41, n48, n66, n70, n71, n77, n78, n79
+</p>
+]]
+
+-- Presets for Polish carriers
+band_presets = b:option(ListValue, "_band_preset", translate("Quick Presets"),
+    translate("Apply recommended band configuration for Polish carriers"))
+band_presets:depends("band_locking", "1")
+band_presets:value("", translate("-- Select Preset --"))
+band_presets:value("play", "Play (B3,B7,B20 + n78)")
+band_presets:value("orange", "Orange (B3,B7,B20 + n78)")
+band_presets:value("plus", "Plus (B1,B3,B7,B20 + n78)")
+band_presets:value("tmobile", "T-Mobile (B3,B7,B20 + n78)")
+band_presets.write = function(self, section, value)
+    if value == "play" or value == "orange" or value == "tmobile" then
+        self.map:set(section, "lte_bands", "3,7,20")
+        self.map:set(section, "nr5g_sa_bands", "78")
+        self.map:set(section, "nr5g_nsa_bands", "78")
+    elseif value == "plus" then
+        self.map:set(section, "lte_bands", "1,3,7,20")
+        self.map:set(section, "nr5g_sa_bands", "78")
+        self.map:set(section, "nr5g_nsa_bands", "78")
+    end
+end
+
+-- Warning message
+band_warning = b:option(DummyValue, "_warning", " ")
+band_warning:depends("band_locking", "1")
+band_warning.rawhtml = true
+band_warning.value = [[
+<div style="background:#fff3cd; border:1px solid #ffc107; padding:10px; border-radius:4px; margin:10px 0;">
+<b style="color:#856404;">⚠️ Warning:</b>
+<ul style="margin:5px 0; padding-left:20px; color:#856404;">
+<li>Band locking is <b>specific to Fibocom FM350-GL</b> modem only</li>
+<li>Incorrect band configuration may prevent connection</li>
+<li>Locking to unavailable bands will cause connection failure</li>
+<li>Leave empty for automatic band selection (recommended for beginners)</li>
+<li>Changes require modem restart to take effect</li>
+</ul>
+</div>
+]]
+
 return m
