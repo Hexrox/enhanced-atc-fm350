@@ -79,7 +79,13 @@ get_device() {
     else
         for dev in /dev/ttyUSB*; do
             if [ -c "$dev" ]; then
-                response=$(timeout 3 sh -c "echo ATI > $dev && cat $dev" 2>/dev/null)
+                # Properly communicate with device using stty and printf
+                response=$(timeout 3 sh -c "
+                    stty -F \"$dev\" raw -echo 115200 2>/dev/null || exit 1
+                    printf 'ATI\r\n' > \"$dev\"
+                    sleep 1
+                    cat \"$dev\" 2>/dev/null
+                " 2>/dev/null)
                 if echo "$response" | grep -qi "fibocom\|fm350"; then
                     echo "$dev"
                     return

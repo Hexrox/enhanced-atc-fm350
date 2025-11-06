@@ -152,15 +152,15 @@
         var output = document.getElementById('ca-output');
         var badge = document.getElementById('ca-badge');
 
-        output.innerHTML = '<span class="loading"><%:Loading Carrier Aggregation status...%></span>';
-        badge.innerHTML = '';
+        output.textContent = '<%:Loading Carrier Aggregation status...%>';
+        badge.textContent = '';
 
         XHR.get('<%=url("admin/network/enhanced_atc/ca_status")%>', null,
             function(xhr, data) {
                 // Check HTTP status first
                 if (!xhr || xhr.status !== 200) {
                     output.textContent = 'Error: ' + (xhr ? ('HTTP ' + xhr.status) : 'Request failed');
-                    badge.innerHTML = '<span class="atc-status-badge status-inactive">Error</span>';
+                    badge.textContent = 'Error';
                     return;
                 }
 
@@ -168,10 +168,11 @@
                     output.textContent = data.details;
 
                     if (data.active) {
-                        badge.innerHTML = '<span class="atc-status-badge status-active">' +
-                            data.type + ' <%:Active%></span>';
+                        badge.textContent = data.type + ' <%:Active%>';
+                        badge.className = 'atc-status-badge status-active';
                     } else {
-                        badge.innerHTML = '<span class="atc-status-badge status-inactive"><%:No CA%></span>';
+                        badge.textContent = '<%:No CA%>';
+                        badge.className = 'atc-status-badge status-inactive';
                     }
                 } else {
                     output.textContent = '<%:Error retrieving CA status%>';
@@ -193,7 +194,7 @@
         }
 
         var timeEstimate = mode === 'quick' ? '5-10' : (mode === 'medium' ? '10-20' : '60-180');
-        output.innerHTML = '<span class="loading"><%:Scanning... This may take%> ' + timeEstimate + ' <%:seconds%></span>';
+        output.textContent = '<%:Scanning... This may take%> ' + timeEstimate + ' <%:seconds%>';
         button.disabled = true;
 
         XHR.post('<%=url("admin/network/enhanced_atc/band_scan")%>',
@@ -222,7 +223,7 @@
     function refreshModemInfo() {
         var output = document.getElementById('modem-output');
 
-        output.innerHTML = '<span class="loading"><%:Loading modem information...%></span>';
+        output.textContent = '<%:Loading modem information...%>';
 
         XHR.get('<%=url("admin/network/enhanced_atc/modem_info")%>', null,
             function(xhr, data) {
@@ -247,7 +248,7 @@
     function checkFCCStatus() {
         var output = document.getElementById('fcc-output');
 
-        output.innerHTML = '<span class="loading"><%:Checking FCC status...%></span>';
+        output.textContent = '<%:Checking FCC status...%>';
 
         XHR.get('<%=url("admin/network/enhanced_atc/fcc_status")%>', null,
             function(xhr, data) {
@@ -273,7 +274,7 @@
             return;
         }
 
-        output.innerHTML = '<span class="loading"><%:Performing FCC unlock...%></span>';
+        output.textContent = '<%:Performing FCC unlock...%>';
 
         XHR.get('<%=url("admin/network/enhanced_atc/fcc_unlock")%>', null,
             function(xhr, data) {
