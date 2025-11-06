@@ -1,0 +1,269 @@
+<%+header%>
+
+<style>
+.atc-section {
+    margin: 20px 0;
+    padding: 15px;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.atc-section h3 {
+    margin-top: 0;
+    color: #333;
+    border-bottom: 2px solid #0099cc;
+    padding-bottom: 5px;
+}
+
+.atc-output {
+    background: #fff;
+    border: 1px solid #ccc;
+    padding: 10px;
+    font-family: monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    max-height: 400px;
+    overflow-y: auto;
+    margin: 10px 0;
+}
+
+.atc-button {
+    padding: 8px 15px;
+    margin: 5px;
+    background: #0099cc;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.atc-button:hover {
+    background: #0077aa;
+}
+
+.atc-button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+.atc-select {
+    padding: 8px;
+    margin: 5px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 14px;
+}
+
+.atc-status-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.status-active {
+    background: #28a745;
+    color: white;
+}
+
+.status-inactive {
+    background: #dc3545;
+    color: white;
+}
+
+.loading {
+    color: #666;
+    font-style: italic;
+}
+</style>
+
+<h2><%:Enhanced ATC - Status & Diagnostics%></h2>
+<p><%:Monitor Carrier Aggregation and scan available bands (Fibocom FM350-GL specific)%></p>
+
+<!-- Carrier Aggregation Section -->
+<div class="atc-section">
+    <h3><%:Carrier Aggregation Status%></h3>
+    <p><%:View current carrier aggregation status and component carriers%></p>
+
+    <div>
+        <button class="atc-button" onclick="refreshCAStatus()"><%:Refresh CA Status%></button>
+        <span id="ca-badge"></span>
+    </div>
+
+    <div class="atc-output" id="ca-output">
+        <span class="loading"><%:Loading...%></span>
+    </div>
+</div>
+
+<!-- Band Scanner Section -->
+<div class="atc-section">
+    <h3><%:Advanced Band Scanner%></h3>
+    <p><%:Scan available frequency bands in your area%></p>
+
+    <div>
+        <select id="scan-mode" class="atc-select">
+            <option value="quick"><%:Quick Scan%> (5-10s)</option>
+            <option value="medium"><%:Medium Scan%> (10-20s)</option>
+            <option value="full"><%:Full Scan%> (1-3min, <%:disconnects modem!%>)</option>
+        </select>
+        <button class="atc-button" id="scan-button" onclick="startBandScan()"><%:Start Scan%></button>
+    </div>
+
+    <div class="atc-output" id="scan-output">
+        <span class="loading"><%:Ready to scan. Select mode and click Start Scan.%></span>
+    </div>
+</div>
+
+<!-- Modem Info Section -->
+<div class="atc-section">
+    <h3><%:Modem Information%></h3>
+    <p><%:Current modem status and firmware information%></p>
+
+    <div>
+        <button class="atc-button" onclick="refreshModemInfo()"><%:Refresh Modem Info%></button>
+    </div>
+
+    <div class="atc-output" id="modem-output">
+        <span class="loading"><%:Loading...%></span>
+    </div>
+</div>
+
+<!-- FCC Status Section -->
+<div class="atc-section">
+    <h3><%:FCC Lock Status%></h3>
+    <p><%:Check and manage FCC lock status%></p>
+
+    <div>
+        <button class="atc-button" onclick="checkFCCStatus()"><%:Check FCC Status%></button>
+        <button class="atc-button" onclick="performFCCUnlock()"><%:Unlock FCC%></button>
+    </div>
+
+    <div class="atc-output" id="fcc-output">
+        <span class="loading"><%:Click buttons to check or unlock FCC%></span>
+    </div>
+</div>
+
+<script type="text/javascript">
+    // Carrier Aggregation Functions
+    function refreshCAStatus() {
+        var output = document.getElementById('ca-output');
+        var badge = document.getElementById('ca-badge');
+
+        output.innerHTML = '<span class="loading"><%:Loading Carrier Aggregation status...%></span>';
+        badge.innerHTML = '';
+
+        XHR.get('<%=url("admin/network/enhanced_atc/ca_status")%>', null,
+            function(xhr, data) {
+                if (data && data.details) {
+                    output.textContent = data.details;
+
+                    if (data.active) {
+                        badge.innerHTML = '<span class="atc-status-badge status-active">' +
+                            data.type + ' <%:Active%></span>';
+                    } else {
+                        badge.innerHTML = '<span class="atc-status-badge status-inactive"><%:No CA%></span>';
+                    }
+                } else {
+                    output.textContent = '<%:Error retrieving CA status%>';
+                }
+            }
+        );
+    }
+
+    // Band Scanner Functions
+    function startBandScan() {
+        var mode = document.getElementById('scan-mode').value;
+        var output = document.getElementById('scan-output');
+        var button = document.getElementById('scan-button');
+
+        if (mode === 'full') {
+            if (!confirm('<%:Full scan will disconnect your modem for 1-3 minutes. Continue?%>')) {
+                return;
+            }
+        }
+
+        var timeEstimate = mode === 'quick' ? '5-10' : (mode === 'medium' ? '10-20' : '60-180');
+        output.innerHTML = '<span class="loading"><%:Scanning... This may take%> ' + timeEstimate + ' <%:seconds%></span>';
+        button.disabled = true;
+
+        XHR.post('<%=url("admin/network/enhanced_atc/band_scan")%>',
+            {mode: mode},
+            function(xhr, data) {
+                button.disabled = false;
+                if (data && data.results) {
+                    output.textContent = data.results;
+                } else {
+                    output.textContent = '<%:Scan failed or timed out%>';
+                }
+            }
+        );
+    }
+
+    // Modem Info Functions
+    function refreshModemInfo() {
+        var output = document.getElementById('modem-output');
+
+        output.innerHTML = '<span class="loading"><%:Loading modem information...%></span>';
+
+        XHR.get('<%=url("admin/network/enhanced_atc/modem_info")%>', null,
+            function(xhr, data) {
+                if (data) {
+                    var info = '<%:Modem Status:%> ' + (data.modem_status || '<%:Unknown%>') + '\n\n';
+                    info += '<%:Firmware Information:%>\n' + (data.firmware || '<%:Unknown%>');
+                    output.innerHTML = info;
+                } else {
+                    output.textContent = '<%:Error retrieving modem info%>';
+                }
+            }
+        );
+    }
+
+    // FCC Functions
+    function checkFCCStatus() {
+        var output = document.getElementById('fcc-output');
+
+        output.innerHTML = '<span class="loading"><%:Checking FCC status...%></span>';
+
+        XHR.get('<%=url("admin/network/enhanced_atc/fcc_status")%>', null,
+            function(xhr, data) {
+                if (data && data.raw) {
+                    output.textContent = data.raw;
+                } else {
+                    output.textContent = '<%:Error checking FCC status%>';
+                }
+            }
+        );
+    }
+
+    function performFCCUnlock() {
+        var output = document.getElementById('fcc-output');
+
+        if (!confirm('<%:Perform FCC unlock?%>')) {
+            return;
+        }
+
+        output.innerHTML = '<span class="loading"><%:Performing FCC unlock...%></span>';
+
+        XHR.get('<%=url("admin/network/enhanced_atc/fcc_unlock")%>', null,
+            function(xhr, data) {
+                if (data && data.message) {
+                    output.textContent = data.message;
+                } else {
+                    output.textContent = '<%:Error performing FCC unlock%>';
+                }
+            }
+        );
+    }
+
+    // Auto-refresh CA status every 60 seconds
+    setInterval(refreshCAStatus, 60000);
+
+    // Initial load
+    refreshCAStatus();
+    refreshModemInfo();
+</script>
+
+<%+footer%>

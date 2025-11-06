@@ -1,9 +1,9 @@
 #!/bin/sh
 # Enhanced ATC CLI with FCC Unlock support
-# Version: 1.1.0
+# Version: 1.2.0
 
 PROG_NAME="enhanced-atc-cli"
-VERSION="1.1.0"
+VERSION="1.2.0"
 
 usage() {
     cat << EOF
@@ -19,6 +19,8 @@ COMMANDS:
     bands           Show current band configuration
     band-lock       Lock to specific bands
     band-unlock     Unlock all bands (automatic)
+    ca-info         Show Carrier Aggregation status
+    scan            Scan available bands (quick/medium/full)
     setup           Interactive setup wizard
 
 OPTIONS:
@@ -33,7 +35,10 @@ EXAMPLES:
     $PROG_NAME bands
     $PROG_NAME band-lock --lte 3,7,20 --5g 78
     $PROG_NAME band-unlock
-    $PROG_NAME setup
+    $PROG_NAME ca-info
+    $PROG_NAME scan quick
+    $PROG_NAME scan medium
+    $PROG_NAME scan full
 EOF
 }
 
@@ -416,6 +421,419 @@ band_unlock() {
     fi
 }
 
+# Carrier Aggregation Info
+ca_info() {
+    local device=$(get_device)
+    log_info "Retrieving Carrier Aggregation info from $device..."
+
+    if [ ! -c "$device" ]; then
+        log_error "Device $device not found"
+        return 1
+    fi
+
+    echo "=== Carrier Aggregation Status ==="
+    echo ""
+
+    # Try AT+QCAINFO first (direct CA info)
+    response=$(timeout 10 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QCAINFO\r\n' > $device
+        sleep 2
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$')
+
+    if echo "$response" | grep -q "QCAINFO"; then
+        parse_qcainfo "$response"
+        return 0
+    fi
+
+    # Fallback to AT+QENG="servingcell"
+    response=$(timeout 10 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QENG=\"servingcell\"\r\n' > $device
+        sleep 2
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$')
+
+    if echo "$response" | grep -q "QENG"; then
+        parse_qeng_ca "$response"
+    else
+        echo "Status: No CA information available"
+        echo ""
+        echo "Possible reasons:"
+        echo "  - Not connected to LTE/5G network"
+        echo "  - Carrier Aggregation not active"
+        echo "  - Weak signal or single carrier only"
+        return 1
+    fi
+}
+
+# Parse QCAINFO response
+parse_qcainfo() {
+    local data="$1"
+    local pcc_count=0
+    local scc_count=0
+    local total_bw=0
+
+    while IFS= read -r line; do
+        if echo "$line" | grep -q "PCC"; then
+            pcc_count=$((pcc_count + 1))
+            echo "Primary Component Carrier (PCC):"
+            parse_ca_component "$line"
+        elif echo "$line" | grep -qE "SCC[0-9]?"; then
+            scc_count=$((scc_count + 1))
+            echo ""
+            echo "Secondary Component Carrier (SCC$scc_count):"
+            parse_ca_component "$line"
+        fi
+    done << EOFDATA
+$(echo "$data" | grep "QCAINFO")
+EOFDATA
+
+    local total_carriers=$((pcc_count + scc_count))
+    if [ $total_carriers -gt 1 ]; then
+        echo ""
+        echo "Status: ACTIVE (${total_carriers}CA)"
+        echo "Technology: LTE-Advanced"
+    else
+        echo ""
+        echo "Status: No Carrier Aggregation (single carrier)"
+    fi
+}
+
+# Parse individual CA component
+parse_ca_component() {
+    local line="$1"
+    # Format: +QCAINFO: "PCC",freq,"band_name",bw,earfcn,rsrp,rsrq,rssi,sinr
+
+    local freq=$(echo "$line" | cut -d',' -f2 | tr -d ' ')
+    local band=$(echo "$line" | cut -d',' -f3 | tr -d '"' | tr -d ' ')
+    local bw=$(echo "$line" | cut -d',' -f4 | tr -d ' ')
+    local rsrp=$(echo "$line" | cut -d',' -f6 | tr -d ' ')
+    local rsrq=$(echo "$line" | cut -d',' -f7 | tr -d ' ')
+    local sinr=$(echo "$line" | cut -d',' -f9 | tr -d ' ')
+
+    echo "  Band: $band"
+    [ -n "$freq" ] && echo "  Frequency: $freq MHz"
+    [ -n "$bw" ] && echo "  Bandwidth: $bw MHz"
+    [ -n "$rsrp" ] && echo "  RSRP: $rsrp dBm"
+    [ -n "$rsrq" ] && echo "  RSRQ: $rsrq dB"
+    [ -n "$sinr" ] && echo "  SINR: $sinr dB"
+}
+
+# Parse QENG response for CA
+parse_qeng_ca() {
+    local data="$1"
+    local pcc_line=$(echo "$data" | grep "QENG" | grep -E "LTE|NR5G" | grep -v "SCC" | head -1)
+    local scc_lines=$(echo "$data" | grep "QENG" | grep "SCC")
+
+    if [ -n "$pcc_line" ]; then
+        echo "Primary Component Carrier (PCC):"
+        parse_qeng_component "$pcc_line"
+    fi
+
+    if [ -n "$scc_lines" ]; then
+        local scc_num=1
+        echo "$scc_lines" | while IFS= read -r line; do
+            echo ""
+            echo "Secondary Component Carrier (SCC$scc_num):"
+            parse_qeng_component "$line"
+            scc_num=$((scc_num + 1))
+        done
+
+        local scc_count=$(echo "$scc_lines" | wc -l)
+        local total=$((scc_count + 1))
+        echo ""
+        echo "Status: ACTIVE (${total}CA)"
+        echo "Technology: LTE-Advanced"
+    else
+        echo ""
+        echo "Status: No Carrier Aggregation detected"
+    fi
+}
+
+# Parse QENG component
+parse_qeng_component() {
+    local line="$1"
+    # Extract band and signal info from QENG servingcell
+    local band=$(echo "$line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/ && $i < 100) print $i}' | head -1)
+    local rsrp=$(echo "$line" | awk -F',' '{print $(NF-3)}')
+    local rsrq=$(echo "$line" | awk -F',' '{print $(NF-2)}')
+    local sinr=$(echo "$line" | awk -F',' '{print $(NF)}')
+
+    [ -n "$band" ] && echo "  Band: B$band"
+    [ -n "$rsrp" ] && echo "  RSRP: $rsrp dBm"
+    [ -n "$rsrq" ] && echo "  RSRQ: $rsrq dB"
+    [ -n "$sinr" ] && echo "  SINR: $sinr dB"
+}
+
+# Band Scanning
+band_scan() {
+    local device=$(get_device)
+    local scan_mode="${1:-quick}"
+
+    log_info "Starting band scan ($scan_mode mode) on $device..."
+
+    if [ ! -c "$device" ]; then
+        log_error "Device $device not found"
+        return 1
+    fi
+
+    case "$scan_mode" in
+        quick)
+            scan_quick "$device"
+            ;;
+        medium)
+            scan_medium "$device"
+            ;;
+        full)
+            scan_full "$device"
+            ;;
+        *)
+            echo "Unknown scan mode: $scan_mode"
+            echo "Usage: $PROG_NAME scan [quick|medium|full]"
+            echo ""
+            echo "  quick  - Fast neighbour scan (5-10 seconds)"
+            echo "  medium - Serving + neighbour cells (10-20 seconds)"
+            echo "  full   - Complete network scan (1-3 minutes, disconnects modem!)"
+            return 1
+            ;;
+    esac
+}
+
+# Quick scan - neighbour cells only
+scan_quick() {
+    local device="$1"
+
+    echo "=== Quick Band Scan ==="
+    echo "Scanning neighbour cells (5-10 seconds)..."
+    echo ""
+
+    response=$(timeout 15 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QENG=\"neighbourcell\"\r\n' > $device
+        sleep 3
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$' | grep "QENG")
+
+    if [ -z "$response" ]; then
+        echo "No neighbour cells detected"
+        echo "Possible reasons:"
+        echo "  - Weak signal area"
+        echo "  - No other cells in range"
+        echo "  - Modem not connected to network"
+        return 1
+    fi
+
+    parse_neighbour_cells "$response"
+}
+
+# Medium scan - serving + neighbour
+scan_medium() {
+    local device="$1"
+
+    echo "=== Medium Band Scan ==="
+    echo "Scanning serving and neighbour cells..."
+    echo ""
+
+    # Get serving cell
+    echo "Current Connection:"
+    response=$(timeout 10 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QENG=\"servingcell\"\r\n' > $device
+        sleep 2
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$' | grep "QENG")
+
+    if [ -n "$response" ]; then
+        parse_serving_cell "$response"
+    fi
+
+    echo ""
+    echo "Detected Bands in Area:"
+    echo ""
+
+    # Get neighbour cells
+    response=$(timeout 15 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+QENG=\"neighbourcell\"\r\n' > $device
+        sleep 3
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$' | grep "QENG")
+
+    if [ -n "$response" ]; then
+        parse_neighbour_cells "$response"
+    else
+        echo "No neighbour cells detected"
+    fi
+}
+
+# Full scan - complete network scan
+scan_full() {
+    local device="$1"
+
+    echo "=== Full Network Scan ==="
+    echo "WARNING: This scan will disconnect your modem and may take up to 3 minutes!"
+    echo -n "Continue? (y/N): "
+    read -r confirm
+
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        echo "Scan cancelled"
+        return 0
+    fi
+
+    echo ""
+    echo "Scanning all available networks (this will take 1-3 minutes)..."
+
+    response=$(timeout 200 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+COPS=?\r\n' > $device
+        sleep 180
+        cat $device 2>/dev/null
+    " | tr -d '\r' | grep -v '^$')
+
+    if echo "$response" | grep -q "COPS"; then
+        echo ""
+        echo "Available Networks:"
+        echo ""
+        parse_cops_response "$response"
+    else
+        echo "Network scan failed or timed out"
+        return 1
+    fi
+
+    # Reconnect to automatic network
+    echo ""
+    echo "Reconnecting to network (automatic mode)..."
+    timeout 30 sh -c "
+        stty -F $device raw -echo 115200 2>/dev/null
+        printf 'AT+COPS=0\r\n' > $device
+        sleep 10
+        cat $device 2>/dev/null
+    " >/dev/null 2>&1
+
+    echo "Scan complete. Your modem should reconnect automatically."
+}
+
+# Parse neighbour cells
+parse_neighbour_cells() {
+    local data="$1"
+
+    printf "%-6s | %-5s | %-8s | %-9s | %-8s | %s\n" "Band" "Type" "EARFCN" "RSRP" "RSRQ" "Quality"
+    printf "%s\n" "-------|-------|----------|-----------|----------|----------"
+
+    echo "$data" | while IFS= read -r line; do
+        if echo "$line" | grep -q "neighbourcell"; then
+            local tech=$(echo "$line" | cut -d',' -f2 | tr -d '"')
+            local earfcn=$(echo "$line" | cut -d',' -f3)
+            local rsrp=$(echo "$line" | awk -F',' '{print $(NF-4)}')
+            local rsrq=$(echo "$line" | awk -F',' '{print $(NF-3)}')
+
+            # Convert EARFCN to band (simplified)
+            local band=$(earfcn_to_band "$earfcn")
+
+            # Determine quality
+            local quality="Poor"
+            if [ "$rsrp" -gt -90 ] 2>/dev/null; then
+                quality="Excellent"
+            elif [ "$rsrp" -gt -100 ] 2>/dev/null; then
+                quality="Good"
+            elif [ "$rsrp" -gt -110 ] 2>/dev/null; then
+                quality="Fair"
+            fi
+
+            printf "%-6s | %-5s | %-8s | %-9s | %-8s | %s\n" \
+                "$band" "$tech" "$earfcn" "${rsrp} dBm" "${rsrq} dB" "$quality"
+        fi
+    done
+}
+
+# Parse serving cell
+parse_serving_cell() {
+    local data="$1"
+    local line=$(echo "$data" | grep "LTE\|NR5G" | grep -v "neighbour" | head -1)
+
+    if [ -n "$line" ]; then
+        local tech=$(echo "$line" | cut -d',' -f2 | tr -d '"')
+        local band=$(echo "$line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/ && $i < 100) print $i}' | head -1)
+        local rsrp=$(echo "$line" | awk -F',' '{print $(NF-3)}')
+        local rsrq=$(echo "$line" | awk -F',' '{print $(NF-2)}')
+
+        echo "  Technology: $tech"
+        [ -n "$band" ] && echo "  Band: B$band"
+        [ -n "$rsrp" ] && echo "  RSRP: $rsrp dBm"
+        [ -n "$rsrq" ] && echo "  RSRQ: $rsrq dB"
+    fi
+}
+
+# Parse COPS response
+parse_cops_response() {
+    local data="$1"
+
+    printf "%-15s | %-12s | %s\n" "Operator" "Status" "Technology"
+    printf "%s\n" "----------------|--------------|-------------"
+
+    echo "$data" | grep -o '([^)]*)' | while IFS= read -r entry; do
+        local stat=$(echo "$entry" | cut -d',' -f1 | tr -d '(')
+        local name=$(echo "$entry" | cut -d',' -f2 | tr -d '"')
+        local act=$(echo "$entry" | cut -d',' -f5 | tr -d ')')
+
+        local status="Unknown"
+        case "$stat" in
+            0) status="Unknown" ;;
+            1) status="Available" ;;
+            2) status="Current" ;;
+            3) status="Forbidden" ;;
+        esac
+
+        local tech="Unknown"
+        case "$act" in
+            0) tech="2G (GSM)" ;;
+            2) tech="3G (UMTS)" ;;
+            7) tech="4G (LTE)" ;;
+            12) tech="5G (NR)" ;;
+        esac
+
+        printf "%-15s | %-12s | %s\n" "$name" "$status" "$tech"
+    done
+}
+
+# Convert EARFCN to band (simplified mapping)
+earfcn_to_band() {
+    local earfcn="$1"
+
+    # Basic EARFCN to band mapping for common bands
+    if [ "$earfcn" -ge 0 ] && [ "$earfcn" -le 599 ]; then
+        echo "B1"
+    elif [ "$earfcn" -ge 600 ] && [ "$earfcn" -le 1199 ]; then
+        echo "B2"
+    elif [ "$earfcn" -ge 1200 ] && [ "$earfcn" -le 1949 ]; then
+        echo "B3"
+    elif [ "$earfcn" -ge 1950 ] && [ "$earfcn" -le 2399 ]; then
+        echo "B4"
+    elif [ "$earfcn" -ge 2400 ] && [ "$earfcn" -le 2649 ]; then
+        echo "B5"
+    elif [ "$earfcn" -ge 2750 ] && [ "$earfcn" -le 3449 ]; then
+        echo "B7"
+    elif [ "$earfcn" -ge 3450 ] && [ "$earfcn" -le 3799 ]; then
+        echo "B8"
+    elif [ "$earfcn" -ge 5010 ] && [ "$earfcn" -le 5179 ]; then
+        echo "B12"
+    elif [ "$earfcn" -ge 5730 ] && [ "$earfcn" -le 5849 ]; then
+        echo "B13"
+    elif [ "$earfcn" -ge 6150 ] && [ "$earfcn" -le 6449 ]; then
+        echo "B20"
+    elif [ "$earfcn" -ge 9210 ] && [ "$earfcn" -le 9659 ]; then
+        echo "B28"
+    elif [ "$earfcn" -ge 66436 ] && [ "$earfcn" -le 67335 ]; then
+        echo "B66"
+    elif [ "$earfcn" -ge 68586 ] && [ "$earfcn" -le 68935 ]; then
+        echo "B71"
+    else
+        echo "B?"
+    fi
+}
+
 VERBOSE=0
 DEVICE_OVERRIDE=""
 
@@ -431,6 +849,8 @@ while [ $# -gt 0 ]; do
         bands) show_bands; exit 0;;
         band-lock) shift; band_lock "$@"; exit 0;;
         band-unlock) band_unlock; exit 0;;
+        ca-info) ca_info; exit 0;;
+        scan) shift; band_scan "$@"; exit 0;;
         setup) echo "Interactive setup not implemented"; exit 0;;
         *) echo "Unknown command: $1"; usage; exit 1;;
     esac

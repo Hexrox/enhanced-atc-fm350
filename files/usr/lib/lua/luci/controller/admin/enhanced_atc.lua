@@ -2,10 +2,12 @@ module("luci.controller.admin.enhanced_atc", package.seeall)
 
 function index()
     entry({"admin", "network", "enhanced_atc"}, cbi("admin_network/enhanced_atc"), _("Enhanced ATC"), 60).dependent = true
-    entry({"admin", "network", "enhanced_atc", "status"}, template("admin_network/enhanced_atc"), _("Status"), 61).dependent = true
+    entry({"admin", "network", "enhanced_atc", "status"}, template("admin_network/enhanced_atc_status"), _("Status & Diagnostics"), 61).dependent = true
     entry({"admin", "network", "enhanced_atc", "fcc_status"}, call("action_fcc_status")).leaf = true
     entry({"admin", "network", "enhanced_atc", "fcc_unlock"}, call("action_fcc_unlock")).leaf = true
     entry({"admin", "network", "enhanced_atc", "modem_info"}, call("action_modem_info")).leaf = true
+    entry({"admin", "network", "enhanced_atc", "ca_status"}, call("action_ca_status")).leaf = true
+    entry({"admin", "network", "enhanced_atc", "band_scan"}, call("action_band_scan")).leaf = true
     entry({"admin", "network", "enhanced_atc", "logs"}, call("action_logs")).leaf = true
 end
 
@@ -68,6 +70,45 @@ function action_modem_info()
     luci.http.write_json({
         modem_status = modem_status,
         firmware = firmware
+    })
+end
+
+function action_ca_status()
+    local sys = require "luci.sys"
+    local json = require "luci.jsonc"
+
+    local result = sys.exec("enhanced-atc-cli ca-info 2>&1")
+    local ca_active = result:match("ACTIVE") ~= nil
+    local ca_type = result:match("(%dCA)") or "No CA"
+
+    luci.http.prepare_content("application/json")
+    luci.http.write_json({
+        active = ca_active,
+        type = ca_type,
+        details = result
+    })
+end
+
+function action_band_scan()
+    local sys = require "luci.sys"
+    local json = require "luci.jsonc"
+    local http = require "luci.http"
+
+    local mode = http.formvalue("mode") or "quick"
+
+    -- Validate mode
+    if mode ~= "quick" and mode ~= "medium" and mode ~= "full" then
+        mode = "quick"
+    end
+
+    -- Perform scan (this may take time)
+    local result = sys.exec("enhanced-atc-cli scan " .. mode .. " 2>&1")
+
+    luci.http.prepare_content("application/json")
+    luci.http.write_json({
+        success = true,
+        mode = mode,
+        results = result
     })
 end
 
