@@ -5,6 +5,9 @@
 PROG_NAME="enhanced-atc-cli"
 VERSION="1.2.1"
 
+# Configurable paths via environment variables (M2 fix)
+DEFAULT_DEVICE="${ATC_DEFAULT_DEVICE:-/dev/ttyUSB3}"
+
 usage() {
     cat << EOF
 $PROG_NAME v$VERSION - Enhanced ATC with FCC Unlock (Fibocom FM350-GL)
@@ -44,6 +47,31 @@ EOF
 
 log_info() { echo "[INFO] $1"; }
 log_error() { echo "[ERROR] $1"; }
+log_debug() {
+    # M3 fix: Use VERBOSE flag for debug messages
+    [ "$VERBOSE" = "1" ] && echo "[DEBUG] $1"
+}
+
+# M4 fix: Check for required command dependencies
+check_dependencies() {
+    local missing=""
+
+    # Check all required commands
+    for cmd in timeout stty printf cat tr grep cut awk; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing="$missing $cmd"
+        fi
+    done
+
+    if [ -n "$missing" ]; then
+        log_error "Missing required commands:$missing"
+        log_error "Please install busybox or the missing utilities"
+        return 1
+    fi
+
+    log_debug "Dependency check passed: all required commands found"
+    return 0
+}
 
 get_device() {
     if [ -n "$DEVICE_OVERRIDE" ]; then
@@ -58,7 +86,7 @@ get_device() {
                 fi
             fi
         done
-        echo "/dev/ttyUSB3"
+        echo "$DEFAULT_DEVICE"
     fi
 }
 
@@ -625,6 +653,7 @@ band_scan() {
     local scan_mode="${1:-quick}"
 
     log_info "Starting band scan ($scan_mode mode) on $device..."
+    log_debug "VERBOSE mode enabled - showing detailed progress"
 
     if [ ! -c "$device" ]; then
         log_error "Device $device not found"
@@ -804,29 +833,28 @@ parse_neighbour_cells() {
     printf "%-6s | %-5s | %-8s | %-9s | %-8s | %s\n" "Band" "Type" "EARFCN" "RSRP" "RSRQ" "Quality"
     printf "%s\n" "-------|-------|----------|-----------|----------|----------"
 
-    echo "$data" | while IFS= read -r line; do
-        if echo "$line" | grep -q "neighbourcell"; then
-            local tech=$(echo "$line" | cut -d',' -f2 | tr -d '"')
-            local earfcn=$(echo "$line" | cut -d',' -f3)
-            local rsrp=$(echo "$line" | awk -F',' '{print $(NF-4)}')
-            local rsrq=$(echo "$line" | awk -F',' '{print $(NF-3)}')
+    # Pre-filter lines to avoid grep in every iteration (M1 optimization)
+    echo "$data" | grep "neighbourcell" | while IFS= read -r line; do
+        local tech=$(echo "$line" | cut -d',' -f2 | tr -d '"')
+        local earfcn=$(echo "$line" | cut -d',' -f3)
+        local rsrp=$(echo "$line" | awk -F',' '{print $(NF-4)}')
+        local rsrq=$(echo "$line" | awk -F',' '{print $(NF-3)}')
 
-            # Convert EARFCN to band (simplified)
-            local band=$(earfcn_to_band "$earfcn")
+        # Convert EARFCN to band (simplified)
+        local band=$(earfcn_to_band "$earfcn")
 
-            # Determine quality
-            local quality="Poor"
-            if [ "$rsrp" -gt -90 ] 2>/dev/null; then
-                quality="Excellent"
-            elif [ "$rsrp" -gt -100 ] 2>/dev/null; then
-                quality="Good"
-            elif [ "$rsrp" -gt -110 ] 2>/dev/null; then
-                quality="Fair"
-            fi
-
-            printf "%-6s | %-5s | %-8s | %-9s | %-8s | %s\n" \
-                "$band" "$tech" "$earfcn" "${rsrp} dBm" "${rsrq} dB" "$quality"
+        # Determine quality
+        local quality="Poor"
+        if [ "$rsrp" -gt -90 ] 2>/dev/null; then
+            quality="Excellent"
+        elif [ "$rsrp" -gt -100 ] 2>/dev/null; then
+            quality="Good"
+        elif [ "$rsrp" -gt -110 ] 2>/dev/null; then
+            quality="Fair"
         fi
+
+        printf "%-6s | %-5s | %-8s | %-9s | %-8s | %s\n" \
+            "$band" "$tech" "$earfcn" "${rsrp} dBm" "${rsrq} dB" "$quality"
     done
 }
 
@@ -926,6 +954,11 @@ earfcn_to_band() {
 
 VERBOSE=0
 DEVICE_OVERRIDE=""
+
+# M4 fix: Check dependencies before proceeding
+if ! check_dependencies; then
+    exit 1
+fi
 
 while [ $# -gt 0 ]; do
     case $1 in

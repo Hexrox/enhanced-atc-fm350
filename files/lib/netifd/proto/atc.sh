@@ -6,8 +6,10 @@
 init_proto "$@"
 
 ATC_VERSION="1.2.1"
-LOG_DIR="/tmp/atc_logs"
-FCC_STATUS_FILE="/tmp/atc_fcc_status"
+
+# Configurable paths via environment variables (M2 fix)
+LOG_DIR="${ATC_LOG_DIR:-/tmp/atc_logs}"
+FCC_STATUS_FILE="${ATC_FCC_STATUS_FILE:-/tmp/atc_fcc_status}"
 
 proto_atc_init_config() {
     available=1
