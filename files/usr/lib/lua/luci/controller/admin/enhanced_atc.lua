@@ -96,12 +96,23 @@ function action_band_scan()
 
     local mode = http.formvalue("mode") or "quick"
 
-    -- Validate mode
-    if mode ~= "quick" and mode ~= "medium" and mode ~= "full" then
-        mode = "quick"
+    -- Strict whitelist validation - prevent command injection
+    local valid_modes = {
+        quick = true,
+        medium = true,
+        full = true
+    }
+
+    if not valid_modes[mode] then
+        luci.http.prepare_content("application/json")
+        luci.http.write_json({
+            success = false,
+            error = "Invalid scan mode. Allowed: quick, medium, full"
+        })
+        return
     end
 
-    -- Perform scan (this may take time)
+    -- Safe to execute - mode is validated against whitelist
     local result = sys.exec("enhanced-atc-cli scan " .. mode .. " 2>&1")
 
     luci.http.prepare_content("application/json")

@@ -5,7 +5,7 @@
 . ../netifd-proto.sh
 init_proto "$@"
 
-ATC_VERSION="1.2.0"
+ATC_VERSION="1.2.1"
 LOG_DIR="/tmp/atc_logs"
 FCC_STATUS_FILE="/tmp/atc_fcc_status"
 

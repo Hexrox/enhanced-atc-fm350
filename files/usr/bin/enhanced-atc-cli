@@ -1,9 +1,9 @@
 #!/bin/sh
 # Enhanced ATC CLI with FCC Unlock support
-# Version: 1.2.0
+# Version: 1.2.1
 
 PROG_NAME="enhanced-atc-cli"
-VERSION="1.2.0"
+VERSION="1.2.1"
 
 usage() {
     cat << EOF
@@ -436,27 +436,44 @@ ca_info() {
 
     # Try AT+QCAINFO first (direct CA info)
     response=$(timeout 10 sh -c "
-        stty -F $device raw -echo 115200 2>/dev/null
-        printf 'AT+QCAINFO\r\n' > $device
+        stty -F \"$device\" raw -echo 115200 2>/dev/null || exit 1
+        printf 'AT+QCAINFO\r\n' > \"$device\"
         sleep 2
-        cat $device 2>/dev/null
+        cat \"$device\" 2>/dev/null
     " | tr -d '\r' | grep -v '^$')
+    local cmd_status=$?
 
-    if echo "$response" | grep -q "QCAINFO"; then
+    # Check for timeout or command failure
+    if [ $cmd_status -eq 124 ]; then
+        log_error "AT+QCAINFO command timed out"
+    elif [ $cmd_status -ne 0 ]; then
+        log_error "AT+QCAINFO command failed with status $cmd_status"
+    fi
+
+    if [ -n "$response" ] && echo "$response" | grep -q "QCAINFO"; then
         parse_qcainfo "$response"
         return 0
     fi
 
     # Fallback to AT+QENG="servingcell"
     response=$(timeout 10 sh -c "
-        stty -F $device raw -echo 115200 2>/dev/null
-        printf 'AT+QENG=\"servingcell\"\r\n' > $device
+        stty -F \"$device\" raw -echo 115200 2>/dev/null || exit 1
+        printf 'AT+QENG=\"servingcell\"\r\n' > \"$device\"
         sleep 2
-        cat $device 2>/dev/null
+        cat \"$device\" 2>/dev/null
     " | tr -d '\r' | grep -v '^$')
+    cmd_status=$?
 
-    if echo "$response" | grep -q "QENG"; then
+    # Check for timeout or command failure
+    if [ $cmd_status -eq 124 ]; then
+        log_error "AT+QENG command timed out"
+    elif [ $cmd_status -ne 0 ]; then
+        log_error "AT+QENG command failed with status $cmd_status"
+    fi
+
+    if [ -n "$response" ] && echo "$response" | grep -q "QENG"; then
         parse_qeng_ca "$response"
+        return 0
     else
         echo "Status: No CA information available"
         echo ""
@@ -464,6 +481,7 @@ ca_info() {
         echo "  - Not connected to LTE/5G network"
         echo "  - Carrier Aggregation not active"
         echo "  - Weak signal or single carrier only"
+        echo "  - Command timeout or device communication error"
         return 1
     fi
 }
@@ -473,9 +491,23 @@ parse_qcainfo() {
     local data="$1"
     local pcc_count=0
     local scc_count=0
-    local total_bw=0
 
-    while IFS= read -r line; do
+    # Extract QCAINFO lines
+    local qcainfo_lines=$(echo "$data" | grep "QCAINFO")
+
+    # Check if we have any CA info
+    if [ -z "$qcainfo_lines" ]; then
+        echo ""
+        echo "Status: No Carrier Aggregation (single carrier)"
+        return 0
+    fi
+
+    # Use for loop instead of while to avoid subshell (POSIX compliant)
+    # Save IFS and set to newline for proper line splitting
+    local oldifs="$IFS"
+    IFS='
+'
+    for line in $qcainfo_lines; do
         if echo "$line" | grep -q "PCC"; then
             pcc_count=$((pcc_count + 1))
             echo "Primary Component Carrier (PCC):"
@@ -486,18 +518,21 @@ parse_qcainfo() {
             echo "Secondary Component Carrier (SCC$scc_count):"
             parse_ca_component "$line"
         fi
-    done << EOFDATA
-$(echo "$data" | grep "QCAINFO")
-EOFDATA
+    done
+    IFS="$oldifs"
 
+    # Calculate total carriers
     local total_carriers=$((pcc_count + scc_count))
     if [ $total_carriers -gt 1 ]; then
         echo ""
         echo "Status: ACTIVE (${total_carriers}CA)"
         echo "Technology: LTE-Advanced"
-    else
+    elif [ $total_carriers -eq 1 ]; then
         echo ""
         echo "Status: No Carrier Aggregation (single carrier)"
+    else
+        echo ""
+        echo "Status: Unable to determine CA status"
     fi
 }
 
@@ -513,6 +548,15 @@ parse_ca_component() {
     local rsrq=$(echo "$line" | cut -d',' -f7 | tr -d ' ')
     local sinr=$(echo "$line" | cut -d',' -f9 | tr -d ' ')
 
+    # Validate and set defaults for empty fields
+    [ -z "$band" ] && band="Unknown"
+    [ -z "$freq" ] && freq=""
+    [ -z "$bw" ] && bw=""
+    [ -z "$rsrp" ] && rsrp=""
+    [ -z "$rsrq" ] && rsrq=""
+    [ -z "$sinr" ] && sinr=""
+
+    # Display information (only show fields that have values)
     echo "  Band: $band"
     [ -n "$freq" ] && echo "  Frequency: $freq MHz"
     [ -n "$bw" ] && echo "  Bandwidth: $bw MHz"
@@ -534,21 +578,29 @@ parse_qeng_ca() {
 
     if [ -n "$scc_lines" ]; then
         local scc_num=1
-        echo "$scc_lines" | while IFS= read -r line; do
+
+        # Use for loop to avoid subshell (POSIX compliant)
+        local oldifs="$IFS"
+        IFS='
+'
+        for line in $scc_lines; do
             echo ""
             echo "Secondary Component Carrier (SCC$scc_num):"
             parse_qeng_component "$line"
             scc_num=$((scc_num + 1))
         done
+        IFS="$oldifs"
 
         local scc_count=$(echo "$scc_lines" | wc -l)
         local total=$((scc_count + 1))
         echo ""
         echo "Status: ACTIVE (${total}CA)"
         echo "Technology: LTE-Advanced"
+        return 0
     else
         echo ""
         echo "Status: No Carrier Aggregation detected"
+        return 0
     fi
 }
 
@@ -610,10 +662,10 @@ scan_quick() {
     echo ""
 
     response=$(timeout 15 sh -c "
-        stty -F $device raw -echo 115200 2>/dev/null
-        printf 'AT+QENG=\"neighbourcell\"\r\n' > $device
+        stty -F \"$device\" raw -echo 115200 2>/dev/null || exit 1
+        printf 'AT+QENG=\"neighbourcell\"\r\n' > \"$device\"
         sleep 3
-        cat $device 2>/dev/null
+        cat \"$device\" 2>/dev/null
     " | tr -d '\r' | grep -v '^$' | grep "QENG")
 
     if [ -z "$response" ]; then
@@ -639,10 +691,10 @@ scan_medium() {
     # Get serving cell
     echo "Current Connection:"
     response=$(timeout 10 sh -c "
-        stty -F $device raw -echo 115200 2>/dev/null
-        printf 'AT+QENG=\"servingcell\"\r\n' > $device
+        stty -F \"$device\" raw -echo 115200 2>/dev/null || exit 1
+        printf 'AT+QENG=\"servingcell\"\r\n' > \"$device\"
         sleep 2
-        cat $device 2>/dev/null
+        cat \"$device\" 2>/dev/null
     " | tr -d '\r' | grep -v '^$' | grep "QENG")
 
     if [ -n "$response" ]; then
@@ -655,10 +707,10 @@ scan_medium() {
 
     # Get neighbour cells
     response=$(timeout 15 sh -c "
-        stty -F $device raw -echo 115200 2>/dev/null
-        printf 'AT+QENG=\"neighbourcell\"\r\n' > $device
+        stty -F \"$device\" raw -echo 115200 2>/dev/null || exit 1
+        printf 'AT+QENG=\"neighbourcell\"\r\n' > \"$device\"
         sleep 3
-        cat $device 2>/dev/null
+        cat \"$device\" 2>/dev/null
     " | tr -d '\r' | grep -v '^$' | grep "QENG")
 
     if [ -n "$response" ]; then
@@ -674,22 +726,52 @@ scan_full() {
 
     echo "=== Full Network Scan ==="
     echo "WARNING: This scan will disconnect your modem and may take up to 3 minutes!"
-    echo -n "Continue? (y/N): "
-    read -r confirm
 
-    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-        echo "Scan cancelled"
-        return 0
+    # Check if we have interactive terminal (stdin is TTY)
+    if [ -t 0 ]; then
+        # Interactive mode - ask for confirmation
+        echo -n "Continue? (y/N): "
+        read -r confirm || {
+            echo "Failed to read input"
+            return 1
+        }
+
+        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            echo "Scan cancelled"
+            return 0
+        fi
+    else
+        # Non-interactive mode (LuCI, cron, etc.) - proceed automatically
+        echo "Non-interactive mode detected - proceeding automatically"
+        echo "Note: Ensure confirmation was obtained before calling this command"
     fi
 
     echo ""
     echo "Scanning all available networks (this will take 1-3 minutes)..."
 
+    # Perform scan with dynamic timeout (exit when we get response)
     response=$(timeout 200 sh -c "
-        stty -F $device raw -echo 115200 2>/dev/null
-        printf 'AT+COPS=?\r\n' > $device
-        sleep 180
-        cat $device 2>/dev/null
+        stty -F \"$device\" raw -echo 115200 2>/dev/null || exit 1
+        printf 'AT+COPS=?\r\n' > \"$device\"
+
+        # Read response dynamically - exit when we get OK or ERROR (max 180s)
+        result=\"\"
+        max_wait=180
+        elapsed=0
+        while [ \$elapsed -lt \$max_wait ]; do
+            # Read with 5 second timeout
+            chunk=\$(timeout 5 dd if=\"$device\" bs=1 count=2048 2>/dev/null || true)
+            result=\"\${result}\${chunk}\"
+
+            # Check if we got complete response (contains OK or ERROR)
+            if echo \"\$result\" | grep -q \"OK\\|ERROR\"; then
+                break
+            fi
+
+            sleep 2
+            elapsed=\$((elapsed + 7))
+        done
+        echo \"\$result\"
     " | tr -d '\r' | grep -v '^$')
 
     if echo "$response" | grep -q "COPS"; then
@@ -706,10 +788,10 @@ scan_full() {
     echo ""
     echo "Reconnecting to network (automatic mode)..."
     timeout 30 sh -c "
-        stty -F $device raw -echo 115200 2>/dev/null
-        printf 'AT+COPS=0\r\n' > $device
+        stty -F \"$device\" raw -echo 115200 2>/dev/null || exit 1
+        printf 'AT+COPS=0\r\n' > \"$device\"
         sleep 10
-        cat $device 2>/dev/null
+        cat \"$device\" 2>/dev/null
     " >/dev/null 2>&1
 
     echo "Scan complete. Your modem should reconnect automatically."
@@ -801,6 +883,14 @@ parse_cops_response() {
 # Convert EARFCN to band (simplified mapping)
 earfcn_to_band() {
     local earfcn="$1"
+
+    # Validate input is a number (POSIX compliant)
+    case "$earfcn" in
+        ''|*[!0-9]*)
+            echo "B?"
+            return 1
+            ;;
+    esac
 
     # Basic EARFCN to band mapping for common bands
     if [ "$earfcn" -ge 0 ] && [ "$earfcn" -le 599 ]; then

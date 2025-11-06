@@ -157,6 +157,13 @@
 
         XHR.get('<%=url("admin/network/enhanced_atc/ca_status")%>', null,
             function(xhr, data) {
+                // Check HTTP status first
+                if (!xhr || xhr.status !== 200) {
+                    output.textContent = 'Error: ' + (xhr ? ('HTTP ' + xhr.status) : 'Request failed');
+                    badge.innerHTML = '<span class="atc-status-badge status-inactive">Error</span>';
+                    return;
+                }
+
                 if (data && data.details) {
                     output.textContent = data.details;
 
@@ -193,8 +200,17 @@
             {mode: mode},
             function(xhr, data) {
                 button.disabled = false;
-                if (data && data.results) {
+
+                // Check HTTP status
+                if (!xhr || xhr.status !== 200) {
+                    output.textContent = 'Error: ' + (xhr ? ('HTTP ' + xhr.status) : 'Request failed');
+                    return;
+                }
+
+                if (data && data.success && data.results) {
                     output.textContent = data.results;
+                } else if (data && data.error) {
+                    output.textContent = 'Error: ' + data.error;
                 } else {
                     output.textContent = '<%:Scan failed or timed out%>';
                 }
@@ -210,12 +226,18 @@
 
         XHR.get('<%=url("admin/network/enhanced_atc/modem_info")%>', null,
             function(xhr, data) {
+                // Check HTTP status
+                if (!xhr || xhr.status !== 200) {
+                    output.textContent = 'Error: ' + (xhr ? ('HTTP ' + xhr.status) : 'Request failed');
+                    return;
+                }
+
                 if (data) {
-                    var info = '<%:Modem Status:%> ' + (data.modem_status || '<%:Unknown%>') + '\n\n';
-                    info += '<%:Firmware Information:%>\n' + (data.firmware || '<%:Unknown%>');
-                    output.innerHTML = info;
+                    var info = 'Modem Status: ' + (data.modem_status || 'Unknown') + '\n\n';
+                    info += 'Firmware Information:\n' + (data.firmware || 'Unknown');
+                    output.textContent = info;  // Use textContent instead of innerHTML to prevent XSS
                 } else {
-                    output.textContent = '<%:Error retrieving modem info%>';
+                    output.textContent = 'Error retrieving modem info';
                 }
             }
         );
@@ -229,6 +251,12 @@
 
         XHR.get('<%=url("admin/network/enhanced_atc/fcc_status")%>', null,
             function(xhr, data) {
+                // Check HTTP status
+                if (!xhr || xhr.status !== 200) {
+                    output.textContent = 'Error: ' + (xhr ? ('HTTP ' + xhr.status) : 'Request failed');
+                    return;
+                }
+
                 if (data && data.raw) {
                     output.textContent = data.raw;
                 } else {
@@ -249,6 +277,12 @@
 
         XHR.get('<%=url("admin/network/enhanced_atc/fcc_unlock")%>', null,
             function(xhr, data) {
+                // Check HTTP status
+                if (!xhr || xhr.status !== 200) {
+                    output.textContent = 'Error: ' + (xhr ? ('HTTP ' + xhr.status) : 'Request failed');
+                    return;
+                }
+
                 if (data && data.message) {
                     output.textContent = data.message;
                 } else {
@@ -258,8 +292,20 @@
         );
     }
 
+    // Clear existing interval if page was reloaded (prevent memory leaks)
+    if (window.atcRefreshInterval) {
+        clearInterval(window.atcRefreshInterval);
+    }
+
     // Auto-refresh CA status every 60 seconds
-    setInterval(refreshCAStatus, 60000);
+    window.atcRefreshInterval = setInterval(refreshCAStatus, 60000);
+
+    // Optional: Clear interval on page unload
+    window.addEventListener('beforeunload', function() {
+        if (window.atcRefreshInterval) {
+            clearInterval(window.atcRefreshInterval);
+        }
+    });
 
     // Initial load
     refreshCAStatus();
